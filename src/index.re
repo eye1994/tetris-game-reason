@@ -1,18 +1,17 @@
 open Reprocessing;
 
+/* type pixelT =
+    | Empty
+    | Fill;
+   */
 type pixelT =
   | Empty
-  | Fill;
-
-type shapeT = {
-  matrix: list(list(pixelT)),
-  color: colorT,
-};
+  | Fill(colorT);
 
 type stateT = {
   player: (int, int),
   matrix: array(array(pixelT)),
-  shape: shapeT,
+  shape: list(list(pixelT)),
   keyUp: bool,
   keyDown: bool,
   keyLeft: bool,
@@ -20,13 +19,21 @@ type stateT = {
   elapsed: int,
 };
 
-let square = [[Fill, Fill], [Fill, Fill]];
-let line = [[Fill, Fill, Fill, Fill]];
-let tShape = [[Fill, Fill, Fill], [Empty, Fill, Empty]];
-let lShape = [[Fill, Fill, Fill, Empty], [Fill, Empty, Empty, Empty]];
-let zShape = [[Fill, Fill, Empty], [Empty, Fill, Fill]];
+let square = (pixel: pixelT) => [[pixel, pixel], [pixel, pixel]];
+let line = (pixel: pixelT) => [[pixel, pixel, pixel, pixel]];
+let tShape = (pixel: pixelT) => [
+  [pixel, pixel, pixel],
+  [Empty, pixel, Empty],
+];
+let lShape = (pixel: pixelT) => [
+  [pixel, pixel, pixel, Empty],
+  [pixel, Empty, Empty, Empty],
+];
+let zShape = (pixel: pixelT) => [
+  [pixel, pixel, Empty],
+  [Empty, pixel, pixel],
+];
 
-let shapes = [square, line, tShape, lShape, zShape];
 let colors = [
   Utils.color(~r=26, ~g=173, ~b=158, ~a=255),
   Utils.color(~r=232, ~g=232, ~b=232, ~a=255),
@@ -35,8 +42,14 @@ let colors = [
 
 let backgroundColor = Utils.color(~r=42, ~g=42, ~b=42, ~a=255);
 let getRandomShape = () => {
-  matrix: List.nth(shapes, Random.int(List.length(shapes))),
-  color: List.nth(colors, Random.int(List.length(colors))),
+  let color = List.nth(colors, Random.int(List.length(colors)));
+  switch (Random.int(4)) {
+  | 0 => square(Fill(color))
+  | 1 => line(Fill(color))
+  | 2 => lShape(Fill(color))
+  | 3 => tShape(Fill(color))
+  | _ => zShape(Fill(color))
+  };
 };
 
 let matrixHeight = 30;
@@ -63,34 +76,35 @@ let setup = env => {
   };
 };
 
-let drawMatrix = ({matrix}, env) => {
+let drawMatrix = ({matrix}, env) =>
   Array.iteri(
     (y, row) =>
-    Array.iteri(
-        (x, pixel) => {
-          Draw.fill(colors -> List.hd, env);
-          if (pixel == Fill) {
+      Array.iteri(
+        (x, pixel) =>
+          switch (pixel) {
+          | Empty => Draw.fill(backgroundColor, env)
+          | Fill(color) =>
+            Draw.fill(color, env);
             Draw.rect(
               ~pos=(x * pixelSize, y * pixelSize),
               ~width=pixelSize,
               ~height=pixelSize,
               env,
             );
-          };
-        },
+          },
         row,
       ),
     matrix,
   );
-}
 
 let drawShape = ({shape, player}, env) =>
   List.iteri(
     (y, row) =>
       List.iteri(
-        (x, pixel) => {
-          Draw.fill(shape.color, env);
-          if (pixel == Fill) {
+        (x, pixel) =>
+          switch (pixel) {
+          | Fill(color) =>
+            Draw.fill(color, env);
             let (playerX, playerY) = player;
             let x = playerX + x;
             let y = playerY + y;
@@ -101,11 +115,12 @@ let drawShape = ({shape, player}, env) =>
               ~height=pixelSize,
               env,
             );
-          };
-        },
+
+          | _ => Draw.fill(backgroundColor, env)
+          },
         row,
       ),
-    shape.matrix,
+    shape,
   );
 
 let flip = matrix =>
@@ -116,50 +131,53 @@ let flip = matrix =>
 
 let rotate = matrix => flip(List.rev(matrix));
 
-let maxX = x => x > matrixWidth ? matrixWidth : x;
+let maxX = (x, shape) => { 
+  let shapeWidth = shape -> List.hd -> List.length;
+  x + shapeWidth - 1 >= matrixWidth ? matrixWidth - shapeWidth: x;
+}
 let minX = x => x < 0 ? 0 : x;
-let maxY = y => y > matrixHeight ? matrixHeight : y;
 
-let isColapsing = (~player, ~shape: shapeT, ~matrix) => {
+let isColapsing = (~player, ~shape, ~matrix) => {
   let found = ref(false);
 
   List.iteri(
     (y, row) =>
       List.iteri(
         (x, pixel) =>
-          if (pixel == Fill) {
+          if (pixel != Empty) {
             let (playerX, playerY) = player;
             let x = playerX + x;
             let y = playerY + y;
-            
-            if (y >= matrixHeight - 1 || matrix[y + 1][x] == Fill) {
+
+            if (y >= matrixHeight - 1 || matrix[y + 1][x] != Empty) {
               found := true;
             };
           },
         row,
       ),
-    shape.matrix,
+    shape,
   );
 
   found^;
 };
 
-let setShapeInMatrix = (~shape: shapeT, ~player, ~matrix) =>
+let setShapeInMatrix = (~shape, ~player, ~matrix) =>
   Array.mapi(
     (y, row) =>
       Array.mapi(
         (x, pixel) => {
           let (playerX, playerY) = player;
-          
+
           if (x >= playerX
               && y >= playerY
-              && y - playerY <= shape.matrix -> List.length - 1
-              && x - playerX <= shape.matrix -> List.hd -> List.length - 1
-              && shape.matrix
-                 -> List.nth(y - playerY)
-                 -> List.nth(x - playerX)
-              == Fill) {
-            Fill;
+              && y
+              - playerY <= shape->List.length
+              - 1
+              && x
+              - playerX <= shape->List.hd->List.length
+              - 1
+              && shape->List.nth(y - playerY)->List.nth(x - playerX) != Empty) {
+            shape->List.nth(y - playerY)->List.nth(x - playerX);
           } else {
             pixel;
           };
@@ -185,18 +203,27 @@ let draw = (state, env) => {
   let nextPlayerX =
     switch (keyLeft, keyRight) {
     | (true, _) => minX(playerX - 1)
-    | (_, true) => maxX(playerX + 1)
+    | (_, true) => maxX(playerX + 1, state.shape)
     | (_, _) => playerX
     };
   let nextPlayerY = keyDown || isMoving ? playerY + 1 : playerY;
-  let nextShapeMatrix =
-    keyUp ? rotate(state.shape.matrix) : state.shape.matrix;
+  let nextShapeMatrix = keyUp ? rotate(state.shape) : state.shape;
   let nextPlayer = (nextPlayerX, nextPlayerY);
-  let isColapsing = isColapsing(~player=nextPlayer, ~shape=state.shape, ~matrix=state.matrix);
+  let isColapsing =
+    isColapsing(~player=nextPlayer, ~shape=state.shape, ~matrix=state.matrix);
 
   if (isColapsing) {
-    {...state, matrix: setShapeInMatrix(~shape=state.shape, ~player=nextPlayer, ~matrix=state.matrix), 
-      shape: getRandomShape(), player: (8, 2)};
+    {
+      ...state,
+      matrix:
+        setShapeInMatrix(
+          ~shape=state.shape,
+          ~player=nextPlayer,
+          ~matrix=state.matrix,
+        ),
+      shape: getRandomShape(),
+      player: (8, 2),
+    };
   } else {
     {
       ...state,
@@ -205,10 +232,7 @@ let draw = (state, env) => {
       keyLeft,
       keyRight,
       player: nextPlayer,
-      shape: {
-        ...state.shape,
-        matrix: nextShapeMatrix,
-      },
+      shape: nextShapeMatrix,
       elapsed: isMoving ? 0 : state.elapsed + 1,
     };
   };
