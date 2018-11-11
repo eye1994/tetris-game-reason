@@ -17,6 +17,7 @@ type stateT = {
   keyLeft: bool,
   keyRight: bool,
   elapsed: int,
+  score: int
 };
 
 let square = (pixel: pixelT) => [[pixel, pixel], [pixel, pixel]];
@@ -73,6 +74,7 @@ let setup = env => {
     keyLeft: false,
     keyRight: false,
     elapsed: 0,
+    score: 0
   };
 };
 
@@ -187,10 +189,26 @@ let setShapeInMatrix = (~shape, ~player, ~matrix) =>
     matrix,
   );
 
+let clearFullLines = (~matrix) => {
+  let filteredRows = List.filter(
+    row => List.exists(pixel => pixel == Empty, row->Array.to_list),
+    matrix->Array.to_list,
+  );
+
+  let score = matrix->Array.length - filteredRows->List.length;
+  let emptyLines = Array.make(score, Array.make(matrixWidth, Empty)) -> Array.to_list;
+  (
+    score,
+    List.append(emptyLines, filteredRows) -> Array.of_list
+  )
+}
+
 let draw = (state, env) => {
   Draw.background(backgroundColor, env);
   drawShape(state, env);
   drawMatrix(state, env);
+
+  let (score, matrix) = clearFullLines(~matrix=state.matrix);
 
   let isMoving = state.elapsed > delay;
   let keyUp = Env.keyPressed(Up, env);
@@ -210,7 +228,7 @@ let draw = (state, env) => {
   let nextShapeMatrix = keyUp ? rotate(state.shape) : state.shape;
   let nextPlayer = (nextPlayerX, nextPlayerY);
   let isColapsing =
-    isColapsing(~player=nextPlayer, ~shape=state.shape, ~matrix=state.matrix);
+    isColapsing(~player=nextPlayer, ~shape=state.shape, ~matrix);
 
   if (isColapsing) {
     {
@@ -219,18 +237,20 @@ let draw = (state, env) => {
         setShapeInMatrix(
           ~shape=state.shape,
           ~player=nextPlayer,
-          ~matrix=state.matrix,
+          ~matrix,
         ),
       shape: getRandomShape(),
       player: (8, 2),
+      score: state.score + score
     };
   } else {
     {
-      ...state,
       keyDown,
       keyUp,
       keyLeft,
       keyRight,
+      matrix,
+      score: state.score + score,
       player: nextPlayer,
       shape: nextShapeMatrix,
       elapsed: isMoving ? 0 : state.elapsed + 1,
