@@ -4,6 +4,8 @@ type pixelT =
   | Empty
   | Fill(colorT);
 
+type gameStateT = Playing | Gameover
+
 type stateT = {
   player: (int, int),
   matrix: array(array(pixelT)),
@@ -15,7 +17,8 @@ type stateT = {
   keyRight: bool,
   elapsed: int,
   score: int,
-  font: fontT
+  font: fontT,
+  gameState: gameStateT
 };
 
 let square = (pixel: pixelT) => [[pixel, pixel], [pixel, pixel]];
@@ -25,8 +28,8 @@ let tShape = (pixel: pixelT) => [
   [Empty, pixel, Empty],
 ];
 let lShape = (pixel: pixelT) => [
-  [pixel, pixel, pixel, Empty],
-  [pixel, Empty, Empty, Empty],
+  [pixel, pixel, pixel],
+  [pixel, Empty, Empty],
 ];
 let zShape = (pixel: pixelT) => [
   [pixel, pixel, Empty],
@@ -34,9 +37,11 @@ let zShape = (pixel: pixelT) => [
 ];
 
 let colors = [
-  Utils.color(~r=26, ~g=173, ~b=158, ~a=255),
-  Utils.color(~r=232, ~g=232, ~b=232, ~a=255),
-  Utils.color(~r=229, ~g=108, ~b=94, ~a=255),
+  Utils.color(~r=69, ~g=205, ~b=255, ~a=255),
+  Utils.color(~r=73, ~g=232, ~b=62, ~a=255),
+  Utils.color(~r=255, ~g=212, ~b=50, ~a=255),
+  Utils.color(~r=232, ~g=73, ~b=126, ~a=255),
+  Utils.color(~r=178, ~g=67, ~b=255, ~a=255),
 ];
 
 let backgroundColor = Utils.color(~r=42, ~g=42, ~b=42, ~a=255);
@@ -57,7 +62,7 @@ let matrixWidth = 20;
 let pixelSize = 30;
 let delay = 20;
 
-let asideWidth = 200;
+let asideWidth = 230;
 
 let drawMatrix = ({matrix}, env) =>
   Array.iteri(
@@ -114,6 +119,16 @@ let flip = matrix =>
 
 let rotate = matrix => flip(List.rev(matrix));
 
+let adjustPlayerAfterRotation = (matrix, player): int => {
+  let (playerX, _) = player;
+
+  if (playerX + (matrix -> List.hd -> List.length) - 1 > matrixWidth - 1) {
+    playerX + (matrix -> List.hd -> List.length) - matrixWidth;
+  } else {
+    0
+  }
+}
+
 let maxX = (x, shape) => { 
   let shapeWidth = shape -> List.hd -> List.length;
   x + shapeWidth - 1 >= matrixWidth ? matrixWidth - shapeWidth: x;
@@ -157,7 +172,7 @@ let setShapeInMatrix = (~shape, ~player, ~matrix) =>
               - playerY <= shape->List.length
               - 1
               && x
-              - playerX <= shape->List.hd->List.length
+              - playerX <= shape->List.nth(y - playerY)->List.length
               - 1
               && shape->List.nth(y - playerY)->List.nth(x - playerX) != Empty) {
             shape->List.nth(y - playerY)->List.nth(x - playerX);
@@ -184,14 +199,9 @@ let clearFullLines = (~matrix) => {
   )
 }
 
-let setup = env => {
-  Env.size(
-    ~width=matrixWidth * pixelSize + asideWidth,
-    ~height=matrixHeight * pixelSize,
-    env,
-  );
+let getInitialState = (env) => {
   {
-    player: (8, 2),
+    player: (8, 0),
     shape: getRandomShape(),
     nextShape: getRandomShape(),
     matrix: Array.make_matrix(matrixHeight, matrixWidth, Empty),
@@ -201,84 +211,110 @@ let setup = env => {
     keyRight: false,
     elapsed: 0,
     score: 0,
-    font: Draw.loadFont(~filename="assets/3x5.fnt", ~isPixel=true, env)
+    font: Draw.loadFont(~filename="assets/subway-ticker.fnt", ~isPixel=true, env), 
+    gameState: Playing
   };
-};
+}
 
-let draw = (state, env) => {
-  Draw.background(backgroundColor, env);
-  drawShape(~relative=state.player, ~shape=state.shape, env);
-  drawMatrix(state, env);
-
-  let (score, matrix) = clearFullLines(~matrix=state.matrix);
-
-  let isMoving = state.elapsed > delay;
-  let keyUp = Env.keyPressed(Up, env);
-  let keyLeft = Env.keyPressed(Left, env);
-  let keyRight = Env.keyPressed(Right, env);
-  let keyDown = Env.keyPressed(Down, env);
-
-  let (playerX, playerY) = state.player;
-
-  let nextPlayerX =
-    switch (keyLeft, keyRight) {
-    | (true, _) => minX(playerX - 1)
-    | (_, true) => maxX(playerX + 1, state.shape)
-    | (_, _) => playerX
-    };
-  let nextPlayerY = keyDown || isMoving ? playerY + 1 : playerY;
-  let nextShapeMatrix = keyUp ? rotate(state.shape) : state.shape;
-  let nextPlayer = (nextPlayerX, nextPlayerY);
-  let isColapsing =
-    isColapsing(~player=nextPlayer, ~shape=state.shape, ~matrix);
-
-
-  Draw.fill(asideColor, env);
-  Draw.rect(
-    ~pos=(pixelSize * matrixWidth, 0),
-    ~width=asideWidth,
-    ~height=pixelSize * matrixHeight,
+let setup = env => {
+  Env.size(
+    ~width=matrixWidth * pixelSize + asideWidth,
+    ~height=matrixHeight * pixelSize,
     env,
   );
-  drawShape(~shape=state.nextShape, ~relative=(
-    matrixWidth + 2,
-    matrixHeight / 2
-  ), env)  
+  getInitialState(env);
+};
 
-  Draw.pushMatrix(env);
-  let textWidth = Draw.textWidth(~font=state.font, ~body=string_of_int(state.score), env);
-  Draw.scale(~x=2., ~y=2., env);
-  Draw.text(~font=state.font, ~body=string_of_int(state.score), ~pos=((matrixWidth * pixelSize + (asideWidth / 2) - textWidth / 2) / 2, 50), env);
-  Draw.popMatrix(env);
+let drawSideBar = (state, env) => {
+  Draw.rect(
+      ~pos=(pixelSize * matrixWidth, 0),
+      ~width=asideWidth,
+      ~height=pixelSize * matrixHeight,
+      env,
+    );
+    drawShape(~shape=state.nextShape, ~relative=(
+      matrixWidth + 2,
+      matrixHeight / 2
+    ), env)  
+    
+    Draw.text(~font=state.font, ~body="Next Shape", ~pos=((matrixWidth * pixelSize + 20), matrixHeight * pixelSize / 2 - 50), env);
+    Draw.pushMatrix(env);
+    let textWidth = Draw.textWidth(~font=state.font, ~body=string_of_int(state.score), env);
+    Draw.scale(~x=2., ~y=2., env);
+    Draw.text(~font=state.font, ~body=string_of_int(state.score), ~pos=((matrixWidth * pixelSize + (asideWidth / 2) - textWidth / 2) / 2, 50), env);
+    Draw.popMatrix(env);
+}
 
-  if (isColapsing) {
-    {
-      ...state,
-      matrix:
-        setShapeInMatrix(
-          ~shape=state.shape,
-          ~player=nextPlayer,
-          ~matrix,
-        ),
-      shape: state.nextShape,  
-      nextShape: getRandomShape(),
-      player: (8, 2),
-      score: state.score + score
-    };
+let draw = (state, env) => {
+  if (state.gameState == Gameover && Env.keyPressed(Space, env)) {
+    getInitialState(env);
+  } else if (state.gameState == Gameover) {
+    let textWidth = Draw.textWidth(~font=state.font, ~body="Game Over", env);
+    let subTextWidth = Draw.textWidth(~font=state.font, ~body="Press Space to restart", env);
+    Draw.text(~font=state.font, ~body="Game Over", ~pos=(matrixWidth * pixelSize / 2 - textWidth / 2, matrixHeight * pixelSize / 2 - 20), env);
+    Draw.text(~font=state.font, ~body="Press Space to restart", ~pos=(matrixWidth * pixelSize / 2 - subTextWidth / 2, matrixHeight * pixelSize / 2 + 20), env);
+    state;
   } else {
-    {
-      ...state,
-      keyDown,
-      keyUp,
-      keyLeft,
-      keyRight,
-      matrix,
-      score: state.score + score,
-      player: nextPlayer,
-      shape: nextShapeMatrix,
-      elapsed: isMoving ? 0 : state.elapsed + 1,
+    Draw.background(backgroundColor, env);
+    drawShape(~relative=state.player, ~shape=state.shape, env);
+    drawMatrix(state, env);
+
+    let (score, matrix) = clearFullLines(~matrix=state.matrix);
+
+    let isMoving = state.elapsed > delay;
+    let keyUp = Env.keyPressed(Up, env);
+    let keyLeft = Env.keyPressed(Left, env);
+    let keyRight = Env.keyPressed(Right, env);
+    let keyDown = state.keyDown ? !Env.keyReleased(Down, env) && !Env.keyPressed(Down, env): Env.keyPressed(Down, env);
+
+    let (playerX, playerY) = state.player;
+    let nextPlayerX = 
+      switch (keyLeft, keyRight) {
+      | (true, _) => minX(playerX - 1)
+      | (_, true) => maxX(playerX + 1, state.shape)
+      | (_, _) => playerX
+      };
+    let nextPlayerY = keyDown || isMoving ? playerY + 1 : playerY;
+    let nextShapeMatrix = keyUp ? rotate(state.shape) : state.shape;
+    let playerXDeltaAfterRotation = keyUp ? adjustPlayerAfterRotation(nextShapeMatrix, state.player) : 0;
+    let nextPlayer = (nextPlayerX - playerXDeltaAfterRotation, nextPlayerY);
+    let isColapsing =
+      isColapsing(~player=nextPlayer, ~shape=state.shape, ~matrix);
+
+
+    Draw.fill(asideColor, env);
+    drawSideBar(state, env);
+
+    if (isColapsing) {
+      {
+        ...state,
+        matrix:
+          setShapeInMatrix(
+            ~shape=state.shape,
+            ~player=nextPlayer,
+            ~matrix,
+          ),
+        gameState: playerY <= 2 ? Gameover : state.gameState,
+        shape: state.nextShape,  
+        nextShape: getRandomShape(),
+        player: (8, 2),
+        score: state.score + score
+      };
+    } else {
+      {
+        ...state,
+        keyDown,
+        keyUp,
+        keyLeft,
+        keyRight,
+        matrix,
+        score: state.score + score,
+        player: nextPlayer,
+        shape: nextShapeMatrix,
+        elapsed: isMoving ? 0 : state.elapsed + 1,
+      };
     };
-  };
+  }
 };
 
 run(~setup, ~draw, ());
