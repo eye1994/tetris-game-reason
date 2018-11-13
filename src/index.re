@@ -1,9 +1,5 @@
 open Reprocessing;
 
-/* type pixelT =
-    | Empty
-    | Fill;
-   */
 type pixelT =
   | Empty
   | Fill(colorT);
@@ -12,12 +8,14 @@ type stateT = {
   player: (int, int),
   matrix: array(array(pixelT)),
   shape: list(list(pixelT)),
+  nextShape: list(list(pixelT)),
   keyUp: bool,
   keyDown: bool,
   keyLeft: bool,
   keyRight: bool,
   elapsed: int,
-  score: int
+  score: int,
+  font: fontT
 };
 
 let square = (pixel: pixelT) => [[pixel, pixel], [pixel, pixel]];
@@ -42,6 +40,7 @@ let colors = [
 ];
 
 let backgroundColor = Utils.color(~r=42, ~g=42, ~b=42, ~a=255);
+let asideColor = Utils.color(~r=106, ~g=117, ~b=127, ~a=255);
 let getRandomShape = () => {
   let color = List.nth(colors, Random.int(List.length(colors)));
   switch (Random.int(4)) {
@@ -56,27 +55,9 @@ let getRandomShape = () => {
 let matrixHeight = 30;
 let matrixWidth = 20;
 let pixelSize = 30;
-
 let delay = 20;
 
-let setup = env => {
-  Env.size(
-    ~width=matrixWidth * pixelSize,
-    ~height=matrixHeight * pixelSize,
-    env,
-  );
-  {
-    player: (8, 2),
-    shape: getRandomShape(),
-    matrix: Array.make_matrix(matrixHeight, matrixWidth, Empty),
-    keyUp: false,
-    keyDown: false,
-    keyLeft: false,
-    keyRight: false,
-    elapsed: 0,
-    score: 0
-  };
-};
+let asideWidth = 200;
 
 let drawMatrix = ({matrix}, env) =>
   Array.iteri(
@@ -99,7 +80,7 @@ let drawMatrix = ({matrix}, env) =>
     matrix,
   );
 
-let drawShape = ({shape, player}, env) =>
+let drawShape = (~shape, ~relative, env) =>
   List.iteri(
     (y, row) =>
       List.iteri(
@@ -107,9 +88,9 @@ let drawShape = ({shape, player}, env) =>
           switch (pixel) {
           | Fill(color) =>
             Draw.fill(color, env);
-            let (playerX, playerY) = player;
-            let x = playerX + x;
-            let y = playerY + y;
+            let (relativeX, relativeY) = relative;
+            let x = relativeX + x;
+            let y = relativeY + y;
 
             Draw.rect(
               ~pos=(x * pixelSize, y * pixelSize),
@@ -203,9 +184,30 @@ let clearFullLines = (~matrix) => {
   )
 }
 
+let setup = env => {
+  Env.size(
+    ~width=matrixWidth * pixelSize + asideWidth,
+    ~height=matrixHeight * pixelSize,
+    env,
+  );
+  {
+    player: (8, 2),
+    shape: getRandomShape(),
+    nextShape: getRandomShape(),
+    matrix: Array.make_matrix(matrixHeight, matrixWidth, Empty),
+    keyUp: false,
+    keyDown: false,
+    keyLeft: false,
+    keyRight: false,
+    elapsed: 0,
+    score: 0,
+    font: Draw.loadFont(~filename="assets/3x5.fnt", ~isPixel=true, env)
+  };
+};
+
 let draw = (state, env) => {
   Draw.background(backgroundColor, env);
-  drawShape(state, env);
+  drawShape(~relative=state.player, ~shape=state.shape, env);
   drawMatrix(state, env);
 
   let (score, matrix) = clearFullLines(~matrix=state.matrix);
@@ -230,6 +232,25 @@ let draw = (state, env) => {
   let isColapsing =
     isColapsing(~player=nextPlayer, ~shape=state.shape, ~matrix);
 
+
+  Draw.fill(asideColor, env);
+  Draw.rect(
+    ~pos=(pixelSize * matrixWidth, 0),
+    ~width=asideWidth,
+    ~height=pixelSize * matrixHeight,
+    env,
+  );
+  drawShape(~shape=state.nextShape, ~relative=(
+    matrixWidth + 2,
+    matrixHeight / 2
+  ), env)  
+
+  Draw.pushMatrix(env);
+  let textWidth = Draw.textWidth(~font=state.font, ~body=string_of_int(state.score), env);
+  Draw.scale(~x=2., ~y=2., env);
+  Draw.text(~font=state.font, ~body=string_of_int(state.score), ~pos=((matrixWidth * pixelSize + (asideWidth / 2) - textWidth / 2) / 2, 50), env);
+  Draw.popMatrix(env);
+
   if (isColapsing) {
     {
       ...state,
@@ -239,12 +260,14 @@ let draw = (state, env) => {
           ~player=nextPlayer,
           ~matrix,
         ),
-      shape: getRandomShape(),
+      shape: state.nextShape,  
+      nextShape: getRandomShape(),
       player: (8, 2),
       score: state.score + score
     };
   } else {
     {
+      ...state,
       keyDown,
       keyUp,
       keyLeft,
