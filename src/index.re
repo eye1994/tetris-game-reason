@@ -57,7 +57,7 @@ let getRandomShape = () => {
   };
 };
 
-let matrixHeight = 30;
+let matrixHeight = 28;
 let matrixWidth = 20;
 let pixelSize = 30;
 let delay = 20;
@@ -294,11 +294,15 @@ let draw = (state, env) => {
             ~player=nextPlayer,
             ~matrix,
           ),
-        gameState: playerY <= 2 ? Gameover : state.gameState,
+        gameState: playerY <= 0 ? Gameover : state.gameState,
         shape: state.nextShape,  
         nextShape: getRandomShape(),
-        player: (8, 2),
-        score: state.score + score
+        player: (8, 0),
+        score: state.score + score,
+        keyDown: false,
+        keyLeft: false,
+        keyRight: false,
+        keyUp: false
       };
     } else {
       {
